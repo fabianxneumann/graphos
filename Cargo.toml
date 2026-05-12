@@ -1,0 +1,40 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/graphos-boot",
+    "crates/graphos-core",
+    "crates/graphos-alloc",
+    "crates/graphos-hal",
+    "crates/graphos-kernel",
+    "crates/graphos-shell",
+    "crates/graphos-persist",
+    "crates/graphos-mm",
+    "crates/graphos-ipc",
+    "crates/graphos-cas",
+    "crates/graphos-snapshot",
+    "crates/graphos-hotswap",
+    "crates/graphos-vector",
+    "crates/graphos-ai",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["GraphOS Contributors"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+bitflags = "2.6"
+spin = "0.9"
+postcard = { version = "1.0", default-features = false, features = ["alloc"] }
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+opt-level = 1
+panic = "abort"

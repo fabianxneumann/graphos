@@ -1,0 +1,8 @@
+[package]
+name = "graphos-kernel"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+graphos-core = { path = "../graphos-core" }
+uefi = "0.33"

@@ -1,0 +1,11 @@
+[package]
+name = "graphos-hotswap"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+
+[dependencies]
+graphos-core = { path = "../graphos-core" }
+spin = { workspace = true }

@@ -1,0 +1,7 @@
+[package]
+name = "graphos-shell"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+graphos-core = { path = "../graphos-core", features = ["alloc"] }

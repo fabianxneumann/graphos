@@ -1,0 +1,10 @@
+[package]
+name = "graphos-vector"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+
+[dependencies]
+graphos-core = { path = "../graphos-core" }

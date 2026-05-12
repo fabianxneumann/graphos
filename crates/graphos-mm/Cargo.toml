@@ -1,0 +1,11 @@
+[package]
+name = "graphos-mm"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+
+[dependencies]
+spin = { workspace = true }
+bitflags = { workspace = true }

@@ -1,0 +1,12 @@
+[package]
+name = "graphos-core"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+alloc = []
+std = ["alloc"]
+
+[dependencies]
+bitflags = { workspace = true }

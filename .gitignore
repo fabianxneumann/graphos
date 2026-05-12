@@ -1,0 +1,4 @@
+/target
+*.img
+*.gguf
+.DS_Store

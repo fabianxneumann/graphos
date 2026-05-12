@@ -1,0 +1,11 @@
+[package]
+name = "graphos-boot"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+uefi = { version = "0.33", features = ["alloc", "global_allocator", "panic_handler", "logger"] }
+log = "0.4"
+graphos-core = { path = "../graphos-core", features = ["alloc"] }
+graphos-shell = { path = "../graphos-shell" }
+graphos-ai = { path = "../graphos-ai" }

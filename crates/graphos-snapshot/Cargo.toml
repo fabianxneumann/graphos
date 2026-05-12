@@ -1,0 +1,12 @@
+[package]
+name = "graphos-snapshot"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+
+[dependencies]
+graphos-core = { path = "../graphos-core" }
+graphos-persist = { path = "../graphos-persist" }
+graphos-cas = { path = "../graphos-cas" }

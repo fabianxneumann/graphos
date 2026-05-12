@@ -1,0 +1,12 @@
+[package]
+name = "graphos-persist"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+alloc = []
+
+[dependencies]
+graphos-core = { path = "../graphos-core", features = ["alloc"] }
+uefi = "0.33"

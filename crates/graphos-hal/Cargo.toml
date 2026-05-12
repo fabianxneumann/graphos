@@ -1,0 +1,7 @@
+[package]
+name = "graphos-hal"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+graphos-core = { path = "../graphos-core" }
