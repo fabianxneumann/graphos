@@ -9,7 +9,7 @@ use core::fmt::Write;
 use core::sync::atomic::Ordering;
 
 use graphos_core::{
-    CapabilityToken, Edge, GraphPool, GraphPoolConfig, NodeId, NodeType,
+    CapabilityToken, Edge, GraphPool, GraphPoolConfig, NodeFlags, NodeId, NodeType,
 };
 use graphos_shell::repl;
 use graphos_shell::render;
@@ -325,6 +325,7 @@ fn main() -> Status {
 
     let mut line_buf: [u8; 256] = [0; 256];
     let mut line_len: usize = 0;
+    let mut todo_root: NodeId = NodeId::NULL;
 
     loop {
         // Poll keyboard via UEFI SimpleTextInput
@@ -365,6 +366,171 @@ fn main() -> Status {
                             resident, swapped, hot, pager.config.prefetch_depth
                         );
                         println(&out);
+                        let new_prompt = render::prompt(session.cwd.node_type());
+                        print(&new_prompt);
+                    } else if input == ".stress" {
+                        // Pager stress test: 50-node chain + branch nodes
+                        println("[STRESS] Spawning 50-node chain...");
+                        let mut chain: [NodeId; 50] = [NodeId::NULL; 50];
+                        let mut failed = false;
+
+                        for i in 0..50 {
+                            match pool.alloc_node(NodeType::Process, &cap, timestamp) {
+                                Ok(id) => chain[i] = id,
+                                Err(e) => {
+                                    let msg = format!("[STRESS] Failed at node {}: {:?}", i, e);
+                                    println(&msg);
+                                    failed = true;
+                                    break;
+                                }
+                            }
+                            if i > 0 {
+                                let edge = Edge::new_reference(chain[i - 1], chain[i]);
+                                let _ = pool.connect(edge, &cap);
+                            }
+                        }
+
+                        if !failed {
+                            // Connect root -> chain[0]
+                            let edge = Edge::new_reference(node_ids[0], chain[0]);
+                            let _ = pool.connect(edge, &cap);
+
+                            // Add 3 branch nodes every 10th chain node
+                            let mut branch_count = 0u32;
+                            for i in (0..50).step_by(10) {
+                                for _ in 0..3 {
+                                    if let Ok(branch_id) = pool.alloc_node(NodeType::Process, &cap, timestamp) {
+                                        let edge = Edge::new_reference(chain[i], branch_id);
+                                        let _ = pool.connect(edge, &cap);
+                                        branch_count += 1;
+                                    }
+                                }
+                            }
+
+                            let msg = format!(
+                                "[STRESS] Created 50 chain + {} branch = {} total nodes",
+                                branch_count, 50 + branch_count
+                            );
+                            println(&msg);
+
+                            // Navigate to middle of chain
+                            pager.on_navigate(pool, chain[25]);
+                            let (resident, _swapped, hot) = pager.stats_summary(pool);
+                            let msg = format!(
+                                "[STRESS] At chain[25]: resident={} hot={} (depth={})",
+                                resident, hot, pager.config.prefetch_depth
+                            );
+                            println(&msg);
+
+                            // Navigate to end of chain
+                            pager.on_navigate(pool, chain[49]);
+                            let (resident, _swapped, hot) = pager.stats_summary(pool);
+                            let msg = format!(
+                                "[STRESS] At chain[49]: resident={} hot={} (depth={})",
+                                resident, hot, pager.config.prefetch_depth
+                            );
+                            println(&msg);
+
+                            // Navigate back to root
+                            pager.on_navigate(pool, node_ids[0]);
+                            let (resident, _swapped, hot) = pager.stats_summary(pool);
+                            let msg = format!(
+                                "[STRESS] Back at ROOT: resident={} hot={} (depth={})",
+                                resident, hot, pager.config.prefetch_depth
+                            );
+                            println(&msg);
+
+                            println("[STRESS] Done. Use .pager to inspect.");
+                        }
+                        let new_prompt = render::prompt(session.cwd.node_type());
+                        print(&new_prompt);
+                    } else if input == ".todo" || input.starts_with(".todo ") {
+                        // Lazy-init todo root node
+                        if todo_root.is_null() {
+                            match pool.alloc_node(NodeType::ContentAddr, &cap, timestamp) {
+                                Ok(id) => {
+                                    todo_root = id;
+                                    let edge = Edge::new_reference(node_ids[0], id);
+                                    let _ = pool.connect(edge, &cap);
+                                }
+                                Err(_) => {
+                                    println("[TODO] Failed to create todo list node");
+                                }
+                            }
+                        }
+
+                        if !todo_root.is_null() {
+                            if input == ".todo" {
+                                // List all todos
+                                let mut count = 0u32;
+                                for edge in pool.edges_from(todo_root) {
+                                    if let Some(node) = pool.find_node(edge.target) {
+                                        count += 1;
+                                        let done = if node.flags().contains(NodeFlags::PERSISTED) {
+                                            "[x]"
+                                        } else {
+                                            "[ ]"
+                                        };
+                                        let msg = format!("  {} #{} (node {:x})", done, count, edge.target.counter());
+                                        println(&msg);
+                                    }
+                                }
+                                if count == 0 {
+                                    println("[TODO] Empty. Use .todo add <text> to add items.");
+                                } else {
+                                    let msg = format!("[TODO] {} items", count);
+                                    println(&msg);
+                                }
+                            } else if let Some(text) = input.strip_prefix(".todo add ") {
+                                let text = text.trim();
+                                if text.is_empty() {
+                                    println("[TODO] Usage: .todo add <text>");
+                                } else {
+                                    match pool.alloc_node(NodeType::ContentAddr, &cap, timestamp) {
+                                        Ok(item_id) => {
+                                            let edge = Edge::new_reference(todo_root, item_id);
+                                            let _ = pool.connect(edge, &cap);
+                                            pager.on_access(pool, pool.node_index(item_id).unwrap_or(0));
+                                            let msg = format!("[TODO] Added: {}", text);
+                                            println(&msg);
+                                        }
+                                        Err(e) => {
+                                            let msg = format!("[TODO] Failed: {:?}", e);
+                                            println(&msg);
+                                        }
+                                    }
+                                }
+                            } else if let Some(num_str) = input.strip_prefix(".todo done ") {
+                                let num_str = num_str.trim();
+                                if let Ok(n) = num_str.parse::<u32>() {
+                                    let mut count = 0u32;
+                                    let mut target_id = NodeId::NULL;
+                                    for edge in pool.edges_from(todo_root) {
+                                        count += 1;
+                                        if count == n {
+                                            target_id = edge.target;
+                                            break;
+                                        }
+                                    }
+                                    if !target_id.is_null() {
+                                        if let Some(node) = pool.find_node(target_id) {
+                                            let mut flags = node.flags();
+                                            flags.insert(NodeFlags::PERSISTED);
+                                            node.set_flags(flags);
+                                            let msg = format!("[TODO] Marked #{} done", n);
+                                            println(&msg);
+                                        }
+                                    } else {
+                                        let msg = format!("[TODO] Item #{} not found", n);
+                                        println(&msg);
+                                    }
+                                } else {
+                                    println("[TODO] Usage: .todo done <number>");
+                                }
+                            } else {
+                                println("[TODO] Commands: .todo | .todo add <text> | .todo done <n>");
+                            }
+                        }
                         let new_prompt = render::prompt(session.cwd.node_type());
                         print(&new_prompt);
                     } else {
