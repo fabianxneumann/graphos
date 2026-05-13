@@ -1,0 +1,8 @@
+[package]
+name = "graphos-pager"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+graphos-core = { path = "../graphos-core", features = ["alloc"] }
+graphos-persist = { path = "../graphos-persist" }

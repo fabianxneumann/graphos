@@ -40,6 +40,7 @@ version = "0.1.0"
 dependencies = [
  "graphos-ai",
  "graphos-core",
+ "graphos-pager",
  "graphos-shell",
  "log",
  "uefi",
@@ -96,6 +97,14 @@ version = "0.1.0"
 dependencies = [
  "bitflags",
  "spin",
+]
+
+[[package]]
+name = "graphos-pager"
+version = "0.1.0"
+dependencies = [
+ "graphos-core",
+ "graphos-persist",
 ]
 
 [[package]]

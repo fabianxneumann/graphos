@@ -9,3 +9,4 @@ log = "0.4"
 graphos-core = { path = "../graphos-core", features = ["alloc"] }
 graphos-shell = { path = "../graphos-shell" }
 graphos-ai = { path = "../graphos-ai" }
+graphos-pager = { path = "../graphos-pager" }

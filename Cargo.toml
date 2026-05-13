@@ -15,6 +15,7 @@ members = [
     "crates/graphos-hotswap",
     "crates/graphos-vector",
     "crates/graphos-ai",
+    "crates/graphos-pager",
 ]
 
 [workspace.package]

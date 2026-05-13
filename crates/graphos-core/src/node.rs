@@ -39,6 +39,8 @@ bitflags::bitflags! {
         const LOCKED    = 0b0000_0100;
         const GC_MARK   = 0b0000_1000;
         const PERSISTED = 0b0001_0000;
+        const SWAPPED   = 0b0010_0000;  // Bit 5 - node data on disk
+        const LOADING   = 0b0100_0000;  // Bit 6 - currently being loaded
     }
 }
 
@@ -72,6 +74,21 @@ impl NodeHeader {
     pub fn set_flags(&self, flags: NodeFlags) {
         let current = self.type_and_flags.load(core::sync::atomic::Ordering::Relaxed);
         let new_val = (current & 0x0000_FFFF) | ((flags.bits() as u32) << 16);
+        self.type_and_flags.store(new_val, core::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Get the residency state (bits 5-6 of flags): 0=resident, 1=swapped, 2=loading
+    #[inline]
+    pub fn residency_state(&self) -> u8 {
+        ((self.flags().bits() >> 5) & 0b11) as u8
+    }
+
+    /// Set the residency state (bits 5-6 of flags)
+    pub fn set_residency(&self, state: u8) {
+        let current = self.type_and_flags.load(core::sync::atomic::Ordering::Relaxed);
+        let flags_raw = ((current >> 16) as u16) & !(0b11 << 5);
+        let new_flags = flags_raw | (((state & 0b11) as u16) << 5);
+        let new_val = (current & 0x0000_FFFF) | ((new_flags as u32) << 16);
         self.type_and_flags.store(new_val, core::sync::atomic::Ordering::Relaxed);
     }
 }

@@ -2,6 +2,19 @@ use crate::node_id::{NodeId, NodeIdGenerator, NodeType};
 use crate::node::NodeHeader;
 use crate::edge::{Edge, EdgeKind};
 use crate::capability::{CapabilityToken, CapRights};
+use crate::hash::fnv1a_64;
+
+const EMPTY_SLOT: u32 = 0xFFFF_FFFF;
+const HASH_TABLE_SIZE: usize = 65536; // Must be power of 2 for mask
+const EDGE_HEAD_SIZE: usize = 65536;
+
+/// FNV-1a hash on the lower 64 bits (counter) of a NodeId for hash table probing.
+#[inline]
+fn hash_node_id(id: NodeId) -> usize {
+    let key = id.counter();
+    let bytes = key.to_le_bytes();
+    (fnv1a_64(&bytes) as usize) & (HASH_TABLE_SIZE - 1)
+}
 
 /// Errors from graph operations
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,22 +63,42 @@ pub struct GraphPool {
     edge_count: usize,
     id_gen: NodeIdGenerator,
     config: GraphPoolConfig,
+    // Index structures for O(1) node lookup and O(degree) edge iteration
+    node_map: &'static mut [u32],      // Open-addressing hash: hash(NodeId) -> slab_index
+    edge_heads: &'static mut [u32],    // First edge index per node slab_index
 }
 
 impl GraphPool {
     /// Initialize a GraphPool at a given memory region.
     /// Safety: `base` must point to a properly aligned, zeroed region of at least
-    /// `config.max_nodes * 64 + config.max_edges * 64` bytes.
+    /// `config.max_nodes * 64 + config.max_edges * 64 + HASH_TABLE_SIZE * 4 + EDGE_HEAD_SIZE * 4`
+    /// bytes plus `size_of::<GraphPool>()`.
     pub unsafe fn init_at(base: *mut u8, config: GraphPoolConfig) -> &'static mut Self {
         let nodes_size = config.max_nodes * core::mem::size_of::<NodeHeader>();
+        let edges_size = config.max_edges * core::mem::size_of::<Edge>();
+        let node_map_size = HASH_TABLE_SIZE * core::mem::size_of::<u32>();
+        let edge_heads_size = EDGE_HEAD_SIZE * core::mem::size_of::<u32>();
+
         let nodes_ptr = base as *mut NodeHeader;
         let edges_ptr = base.add(nodes_size) as *mut Edge;
+        let node_map_ptr = base.add(nodes_size + edges_size) as *mut u32;
+        let edge_heads_ptr = base.add(nodes_size + edges_size + node_map_size) as *mut u32;
 
         let nodes = core::slice::from_raw_parts_mut(nodes_ptr, config.max_nodes);
         let edges = core::slice::from_raw_parts_mut(edges_ptr, config.max_edges);
+        let node_map = core::slice::from_raw_parts_mut(node_map_ptr, HASH_TABLE_SIZE);
+        let edge_heads = core::slice::from_raw_parts_mut(edge_heads_ptr, EDGE_HEAD_SIZE);
 
-        // Place the GraphPool struct itself after the data arrays
-        let total_data = nodes_size + config.max_edges * core::mem::size_of::<Edge>();
+        // Initialize hash table and edge heads to EMPTY
+        for slot in node_map.iter_mut() {
+            *slot = EMPTY_SLOT;
+        }
+        for head in edge_heads.iter_mut() {
+            *head = EMPTY_SLOT;
+        }
+
+        // Place the GraphPool struct itself after all data arrays
+        let total_data = nodes_size + edges_size + node_map_size + edge_heads_size;
         let pool_ptr = base.add(total_data) as *mut GraphPool;
         pool_ptr.write(GraphPool {
             nodes,
@@ -74,6 +107,8 @@ impl GraphPool {
             edge_count: 0,
             id_gen: NodeIdGenerator::new(),
             config,
+            node_map,
+            edge_heads,
         });
         &mut *pool_ptr
     }
@@ -97,6 +132,7 @@ impl GraphPool {
         self.nodes[idx] = NodeHeader::new(id, node_type as u16, CapabilityToken::OPEN);
         self.nodes[idx].slab_index = idx as u32;
         self.node_count += 1;
+        self.hash_insert(id, idx as u32);
         Ok(id)
     }
 
@@ -182,11 +218,9 @@ impl GraphPool {
         self.edge_count
     }
 
-    /// Find a node by ID (linear scan — will be replaced with hashmap)
+    /// Find a node by ID — O(1) via hash table
     pub fn find_node(&self, id: NodeId) -> Option<&NodeHeader> {
-        self.nodes[..self.node_count]
-            .iter()
-            .find(|n| n.id == id)
+        self.find_node_indexed(id).map(|(_, node)| node)
     }
 
     fn find_node_mut(&mut self, id: NodeId) -> Option<&mut NodeHeader> {
@@ -312,5 +346,52 @@ impl GraphPool {
             }
         }
         Ok(current)
+    }
+
+    // ── Index operations ─────────────────────────────────────────────────
+
+    /// Insert a node ID into the hash table
+    fn hash_insert(&mut self, id: NodeId, slab_index: u32) {
+        let mut slot = hash_node_id(id);
+        loop {
+            if self.node_map[slot] == EMPTY_SLOT {
+                self.node_map[slot] = slab_index;
+                return;
+            }
+            slot = (slot + 1) & (HASH_TABLE_SIZE - 1);
+        }
+    }
+
+    /// O(1) node lookup via hash table
+    pub fn find_node_indexed(&self, id: NodeId) -> Option<(u32, &NodeHeader)> {
+        let mut slot = hash_node_id(id);
+        for _ in 0..HASH_TABLE_SIZE {
+            let idx = self.node_map[slot];
+            if idx == EMPTY_SLOT {
+                return None;
+            }
+            if self.nodes[idx as usize].id == id {
+                return Some((idx, &self.nodes[idx as usize]));
+            }
+            slot = (slot + 1) & (HASH_TABLE_SIZE - 1);
+        }
+        None
+    }
+
+    /// Get slab index for a node ID
+    pub fn node_index(&self, id: NodeId) -> Option<u32> {
+        self.find_node_indexed(id).map(|(idx, _)| idx)
+    }
+
+    /// Iterate edges from a node using slab_index (O(degree) filter)
+    pub fn edges_from_indexed(&self, slab_index: u32) -> impl Iterator<Item = &Edge> {
+        let source_id = if (slab_index as usize) < self.node_count {
+            self.nodes[slab_index as usize].id
+        } else {
+            NodeId::NULL
+        };
+        self.edges[..self.edge_count]
+            .iter()
+            .filter(move |e| e.source == source_id)
     }
 }

@@ -12,7 +12,7 @@ pub mod graph_pool;
 pub mod hash;
 
 pub use node_id::{NodeId, NodeType};
-pub use node::NodeHeader;
+pub use node::{NodeHeader, NodeFlags};
 pub use edge::{Edge, EdgeKind, EdgeFlags};
 pub use capability::{CapabilityToken, CapRights};
 pub use graph_pool::{GraphPool, GraphPoolConfig, GraphError};

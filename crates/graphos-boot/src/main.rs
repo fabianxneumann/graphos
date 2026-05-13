@@ -14,6 +14,7 @@ use graphos_core::{
 use graphos_shell::repl;
 use graphos_shell::render;
 use graphos_shell::session::ShellSession;
+use graphos_pager::pager::{SemanticPager, PagerConfig};
 use uefi::prelude::*;
 use uefi::proto::console::text::Key;
 
@@ -295,6 +296,15 @@ fn main() -> Status {
     let root_node = node_ids[0];
     let serial_node = node_ids[3]; // SERIAL node
 
+    // --- Semantic Pager initialization ---
+    let mut pager = SemanticPager::new(PagerConfig::default());
+    pager.on_navigate(pool, root_node);
+
+    uefi::system::with_stdout(|stdout| {
+        writeln!(stdout, "[PAGER] Semantic pager active (depth={}, topology-aware)", pager.config.prefetch_depth).unwrap();
+        writeln!(stdout).unwrap();
+    });
+
     let mut session = match ShellSession::new(pool, root_node, serial_node, &cap, timestamp) {
         Ok(s) => s,
         Err(e) => {
@@ -348,10 +358,24 @@ fn main() -> Status {
                         println("[AI] Safe demo model: vocab=128 (ASCII), dim=32, no unsafe");
                         let new_prompt = render::prompt(session.cwd.node_type());
                         print(&new_prompt);
+                    } else if input == ".pager" {
+                        let (resident, swapped, hot) = pager.stats_summary(pool);
+                        let out = format!(
+                            "[PAGER] resident={} swapped={} hot={} depth={}",
+                            resident, swapped, hot, pager.config.prefetch_depth
+                        );
+                        println(&out);
+                        let new_prompt = render::prompt(session.cwd.node_type());
+                        print(&new_prompt);
                     } else {
+                        let old_cwd = session.cwd;
                         let (output, new_prompt) = repl::process_line(input, &mut session, pool);
                         if !output.is_empty() {
                             println(&output);
+                        }
+                        // Notify pager on navigation
+                        if session.cwd != old_cwd {
+                            pager.on_navigate(pool, session.cwd);
                         }
                         print(&new_prompt);
                     }
